@@ -1,2 +1,2 @@
-# is_bigfoot_a_republican
-A repo containing the code for my article "Is Bigfoot a Republican?"
+# Is Bigfoot a Republican Repo
+A repo containing the code for my blog post ["Is Bigfoot a Republican?"](www.auggieheschmeyer.com/blog/is-bigfoot-a-republican/)

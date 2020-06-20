@@ -1,0 +1,327 @@
+---
+title: Is Bigfoot a Republican?
+author: Auggie Heschmeyer
+date: '2020-06-19'
+slug: is-bigfoot-a-republican
+tags:
+- just for fun
+- inference
+- polictics
+- analytics
+description: An exploration of election results and Bigfoot data
+keywords:
+- just for fun
+- inference
+- polictics
+- analytics
+---
+
+```{r setup, include=FALSE}
+
+library(knitr)
+library(kableExtra)
+
+options(kableExtra.html.bsTable = T)
+
+kable <- function(data, digits = 2, ...) {
+  knitr::kable(
+    data, 
+    digits = digits, 
+    escape = F, 
+    align = "c", 
+    booktabs = T,
+    ...
+  ) %>% 
+    kable_styling(
+      bootstrap_options = c("striped", "hover", "condensed", "responsive"), 
+      latex_options = "striped", 
+      full_width = T,
+      ...
+    )
+}
+
+opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  tidy = TRUE)
+
+```
+
+I recently came across [a dataset containing all the Bigfoot sightings from 1867 - 2017](https://data.world/timothyrenner/bfro-sightings-data). Naturally, I began to think about the political implications such data must contain. After all, the FBI recently revealed that they have been investigating Bigfoot since the 1970s. So if the government is interested, there must be a political reason. Such as Bigfoot being a dark money donor to the Republican Party!
+
+Okay, jokes and conspiracy theories aside, I did think it would be fun to see whether Bigfoot sightings lined up with the results of the last presidential election. This led me to the tongue-in-cheek question laid out in the title of this article. Please walk with me through this brief comparison of the results of the 2016 presidential election and historical Bigfoot sightings and see if we can't answer the question we've always secretly had: *Is Bigfoot a Republican?* 
+
+Let's get started!
+
+## Importing the Data
+
+The county-level election results can be found [here](https://github.com/tonmcg/US_County_Level_Election_Results_08-16).
+
+First, we're going to load some packages as well as our data.
+
+``````{r}
+
+library(tidyverse)
+library(usmap)
+
+elec_results <-
+  read.csv("https://raw.githubusercontent.com/tonmcg/US_County_Level_Election_Results_08-16/master/2016_US_County_Level_Presidential_Results.csv")
+
+bigfoot <-
+  read.csv(
+    "bfro_reports_geocoded.csv"
+  )
+
+```
+
+We're also going to use the `usmap` package to get some map data for plotting.
+
+```{r}
+
+usa <- map_data("usa")
+states <- map_data('state')
+
+```
+
+## Exploring the Data
+
+Let's take a `glimpse` at these two datasets and see how they're structured.
+
+```{r}
+
+glimpse(elec_results)
+
+```
+
+```{r}
+
+glimpse(bigfoot)
+
+```
+
+We can see that the election results are broken down by county and state and show the percentage won by each major party. It also looks like the data set is missing county-level information for Alaska so we'll have to filter is out when we do our data cleaning.
+
+As for the Bigfoot data, god bless whoever was managing this dataset. Whereas the election results featured a mere nine variables, this Bigfoot data gives us a whopping 27 bits of information about each and every Bigfoot sighting. They even included the phase of the moon! They didn't have to go THAT hard for this dataset, but they did that. They did that for us. Sadly, I'm only going to use location data this time around. Maybe I'll have to revisit this dataset one day and use it to plan my own Bigfoot sighting.
+
+## Preparing the Data for Analysis
+
+Let's start by cleaning the election results.
+
+```{r}
+
+county_winner_tbl <- elec_results %>%
+  as_tibble() %>% 
+  filter(state_abbr != "AK") %>% 
+  mutate(
+    winner = ifelse(per_gop > per_dem, 
+                    "Donald Trump", 
+                    "Hillary Clinton"),
+    winner = winner %>% 
+      as_factor() %>% 
+      fct_relevel("Hillary Clinton"),
+    state = openintro::abbr2state(state_abbr)
+  ) %>% 
+  select(state, county = county_name, winner)
+
+county_winner_tbl %>% 
+  head() %>% 
+  kable()
+
+```
+
+We got rid of Alaska, added a variable that indicated whether Trump or Clinton won depending on the larger percentage, and we converted our state abbreviations to their full names (so that we can join this data with the Bigfoot data).
+
+```{r}
+
+bigfoot_simple_tbl <- bigfoot %>%
+  as_tibble() %>% 
+  mutate(date = lubridate::ymd(date)) %>% 
+  filter(date <= "2016-11-08") %>% 
+  select(county, state, latitude, longitude)
+
+bigfoot_simple_tbl %>% 
+  head() %>% 
+  kable()
+
+```
+
+All we did here was filter to sightings that occurred before the 2016 election and select our variables of interest. We won't use `latitiude` and `longitude` in our statistical analyses, but they'll come in handy later when we plot the sightings.
+Now let's join the two datasets together by county and by state. 
+
+```{r}
+
+sightings_by_county_tbl <- county_winner_tbl %>%
+  left_join(bigfoot_simple_tbl %>% 
+              group_by(state, county) %>% 
+              count(name = "sightings"),
+            by = c("state", "county")) %>% 
+  mutate(sightings = replace_na(sightings, 0))
+
+sightings_by_county_tbl %>% 
+  head() %>% 
+  kable()
+
+```
+
+Before joining, we did a count of sightings by county and then, after the join, filled in the null values for counties with no sightings.
+
+Time to ask some questions and get some answers!
+
+## Who won more counties?
+
+We all know that Trump won, but let's do a quick check to see by how much. We're going to load the `tidyquant` package here because it makes nice charts with presidential-looking colors.
+
+```{r}
+
+library(tidyquant)
+
+sightings_by_county_tbl %>% 
+  count(winner) %>% 
+  mutate(label = scales::comma(n)) %>% 
+  ggplot(aes(x = winner, y = n, fill = winner, label = label)) +
+  geom_col() +
+  geom_label(fill = "white") +
+  theme_tq() +
+  scale_y_continuous(labels = scales::comma) +
+  scale_fill_tq() +
+  labs(
+    title = "Trump won far more counties than Clinton",
+    x = "",
+    y = "Counties Won"
+  ) +
+  theme(legend.position = "none")
+
+```
+
+Phew. That's quite a difference in counties. But we're here to see what impact Bigfoot sightings have on these election results, so let's ask another question.
+
+## Is there a difference in the average number of Bigfoot sightings between each candidate's counties?
+
+If my suspicions are true and Bigfoot really is a GOP operative, it would make sense that his presence in certain counties would have an impact on the way that county voted. Perhaps a county voted for Trump because Bigfoot was seen numerous times getting the word out about making America great again. 
+
+```{r}
+
+sightings_by_county_tbl %>% 
+  group_by(winner) %>% 
+  summarize(avg_sightings = mean(sightings)) %>% 
+  mutate(label = scales::number(avg_sightings, accuracy = 0.1)) %>% 
+  ggplot(aes(x = winner, 
+             y = avg_sightings, 
+             fill = winner, 
+             label = label)) +
+  geom_col() +
+  geom_label(fill = "white") +
+  theme_tq() +
+  scale_fill_tq() +
+  labs(
+    title = "Clinton's counties had more Bigfoot sightings on average than Trump's",
+    x = "",
+    y = "Average Number of Sightings"
+  ) +
+  theme(legend.position = "none")
+
+```
+
+Now this is a twist! Perhaps Bigfoot isn't a Republican after all, but a Democrat! 
+
+This may be an unexpected difference, but is it a statistically significant difference? Let's use the `infer` package to do a statistical tests and be sure.
+
+```{r}
+
+library(infer)
+
+t_test_tbl <- sightings_by_county_tbl %>% 
+  t_test(sightings ~ winner, 
+         order = c("Hillary Clinton", "Donald Trump"))
+
+t_test_tbl %>% 
+  kable(digits = 2)
+
+```
+
+So it is significant! Check the p-value lower than the standard threshold of 0.05. It looks like the 95% confidence interval for our test shows that the difference in sightings ranges from about .12 to 1 more on average per county.
+
+### What proportion of those counties had a Bigfoot sighting?
+
+Okay, so Clinton counties may have had a higher average number of sightings, but maybe that's just because she had a smaller number of counties. Maybe Trump counties' average was lower because there are a lot more of them. Let's make a graphic to compare the proportions of counties with Bigfoot sightings between the two candidates.
+
+```{r}
+
+sightings_by_county_tbl %>% 
+  mutate(sightings_bin = ifelse(sightings >= 1, 1, 0)) %>%
+  group_by(winner) %>%
+  summarize(prop = mean(sightings_bin)) %>%
+  mutate(label = scales::percent(prop)) %>%
+  ggplot(aes(x = winner,
+             y = prop, 
+             fill = winner, 
+             label = label)) +
+  geom_col() +
+  geom_label(fill = "white") +
+  theme_tq() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_tq() +
+  labs(
+    title = "Both candidates won a similar proportion of counties with Bigfoot sightings",
+    x = "",
+    y = "Counties with Bigfoot Sightings (%)"
+  ) +
+  theme(legend.position = "none")
+
+```
+
+Interesting. Despite having a more sightings in Clinton counties, it looks like Bigfoot is just as present in Trump counties. How do I rectify this with the results of the test that showed Clinton counties with more average sightings? Has Bigfoot been going on vacation to Democratic counties and been spotted there over and over again? Maybe a map showing the sightings will help me sort things out.
+
+## How does geographic location impact Bigfoot sightings and election results?
+
+First, let's get the coordinates of our Bigfoot sightings.
+
+```{r}
+
+lat_long_tbl <- county_winner_tbl %>%
+  left_join(bigfoot_simple_tbl,
+            by = c("state", "county")) %>% 
+  group_by(county) %>% 
+  mutate(sightings = n())
+
+```
+
+Now let's see where these sightings are happening. We'll use the `usa` and `states` data that we downloaded earlier.
+
+```{r}
+
+lat_long_tbl %>%
+  filter(longitude > -135) %>%
+  ggplot(aes(x = longitude, y = latitude, color = winner)) +
+  geom_polygon(
+    data = states,
+    aes(x = long, y = lat, group = group),
+    fill = NA,
+    color = 'grey',
+    show.legend = FALSE
+  ) +
+  geom_jitter(aes(size = sightings), alpha = .2) +
+  theme_tq() +
+  scale_color_tq() +
+  labs(title = "Bigfoot sightings mostly occur in sparsely populated, rural areas areas Trump won",
+       x = "",
+       y = "",
+       color = "",
+       size = "Number of Sightings") +
+  theme(
+    axis.text = element_blank(),
+    legend.text = element_text(size = 15),
+    line = element_blank(),
+    plot.title = element_text(hjust = .5),
+    plot.subtitle = element_text(hjust = .5),
+    rect = element_blank()
+  )
+
+```
+
+This definitely clears things up. Trump won a lot of sparsely-populated, rural counties throughout the US. "Sparsely-populated and rural" sounds a lot like places Bigfoot may want to live. All of those red dots represent Bigfoot sightings in Trump counties and most of them aren't near any major metropolis. The blue dots, however, do seem to be centered around those metropolises. This supports my theory that perhaps, like the rest of us, Bigfoot enjoys visiting the city and given how many people there are in the city, the chances of him/her being spotted by more people goes way up.
+
+## In Conclusion
+So, is Bigfoot a Republican? While I may have had a lot of fun playing around with this data, I don't think I can definitively make that call. Given that he lives in rural, Trump-leaning counties, it seems like a safe assumption, though. Or maybe Bigfoot is a Democrat, but just can't afford rent in the city. Perhaps we'll see Bigfeet of the US unite and vote for a third-party candidate!
+
+Thanks for walking through this analysis with me. Feel free to reach out to on [LinkedIn](https://www.linkedin.com/in/auggieheschmeyer/) or [Twitter](https://twitter.com/realauggiehesch). Happy analyzing!
